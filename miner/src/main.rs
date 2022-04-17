@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Some(command) => match command {
             Command::MineXalts(opts) => mine_xalts(args, opts).await,
             Command::MineXapes(opts) => mine_xapes(args, opts).await,
+            Command::Summarize(opts) => summarize(args, opts).await,
         },
     }
 }
@@ -201,13 +202,13 @@ async fn mine_xapes(args: Args, opts: MineXapes) -> Result<(), Box<dyn Error>> {
                 Value::Number(value) => {
                     let value = format!("{}", value);
                     db.execute(
-                        "INSERT INTO xalt_atts (mint_address, trait_type, value) values (?1, ?2, ?3)",
+                        "INSERT INTO xape_atts (mint_address, trait_type, value) values (?1, ?2, ?3)",
                         params![mint_address.to_string(), attribute.trait_type, value],
                     )?;
                 }
                 Value::String(value) => {
                     db.execute(
-                        "INSERT INTO xalt_atts (mint_address, trait_type, value) values (?1, ?2, ?3)",
+                        "INSERT INTO xape_atts (mint_address, trait_type, value) values (?1, ?2, ?3)",
                         params![mint_address.to_string(), attribute.trait_type, value],
                     )?;
                 }
@@ -217,6 +218,61 @@ async fn mine_xapes(args: Args, opts: MineXapes) -> Result<(), Box<dyn Error>> {
         }
         eprint!("{}", "+");
     }
+    Ok(())
+}
+
+async fn summarize(args: Args, _opts: Summarize) -> Result<(), Box<dyn Error>> {
+    let db = Connection::open(args.db)?;
+
+    let mut trait_types = db.prepare("select distinct(trait_type) from xalt_atts order by 1")?;
+    let trait_types = trait_types.query_map([], |row| Ok(TraitType { name: row.get(0)? }))?;
+    println!("XALT Traits");
+    for trait_type in trait_types {
+        let trait_type = trait_type?;
+        println!("  {}", trait_type.name.clone());
+
+        // let counters =
+        //     "SELECT value, count(*) FROM xalt_atts WHERE trait_type = ? GROUP BY 1 ORDER BY 2";
+        // let mut counters = db.prepare(counters)?;
+        // let counters = counters.query_map([trait_type.name], |row| {
+        //     Ok(Counter {
+        //         name: row.get(0)?,
+        //         count: row.get(1)?,
+        //     })
+        // })?;
+        // for counter in counters {
+        //     let counter = counter?;
+        //     println!("    {: <34} {: >3}", counter.name, counter.count);
+        // }
+    }
+    println!("");
+
+    let mut trait_types = db.prepare("select distinct(trait_type) from xape_atts order by 1")?;
+    let trait_types = trait_types.query_map([], |row| Ok(TraitType { name: row.get(0)? }))?;
+    println!("XAPE Traits");
+    for trait_type in trait_types {
+        let trait_type = trait_type?;
+        if trait_type.name == "Inmate number" {
+            continue;
+        }
+        println!("  {}", trait_type.name);
+
+        // let counters =
+        //     "SELECT value, count(*) FROM xape_atts WHERE trait_type = ? GROUP BY 1 ORDER BY 2";
+        // let mut counters = db.prepare(counters)?;
+        // let counters = counters.query_map([trait_type.name], |row| {
+        //     Ok(Counter {
+        //         name: row.get(0)?,
+        //         count: row.get(1)?,
+        //     })
+        // })?;
+        // for counter in counters {
+        //     let counter = counter?;
+        //     println!("    {: <34} {: >3}", counter.name, counter.count);
+        // }
+    }
+    println!("");
+
     Ok(())
 }
 
@@ -242,6 +298,7 @@ fn default_rpc_url() -> String {
 enum Command {
     MineXapes(MineXapes),
     MineXalts(MineXalts),
+    Summarize(Summarize),
 }
 
 #[derive(Clone, Debug, Options)]
@@ -261,8 +318,10 @@ struct MineXapes {
 }
 
 fn default_xape_mints_file() -> String {
-    "../data/xalt-mints".to_owned()
+    "../data/xape-mints".to_owned()
 }
+#[derive(Clone, Debug, Options)]
+struct Summarize {}
 
 #[derive(Clone, Debug, Deserialize)]
 struct JsonMeta {
@@ -275,6 +334,15 @@ struct JsonMeta {
 struct JsonAttribute {
     trait_type: String,
     value: Value,
+}
+
+struct TraitType {
+    name: String,
+}
+
+struct Counter {
+    name: String,
+    count: u32,
 }
 
 fn find_metadata_address(mint: Pubkey) -> Pubkey {
