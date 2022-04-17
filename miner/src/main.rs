@@ -122,7 +122,101 @@ async fn mine_xalts(args: Args, opts: MineXalts) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn mine_xapes(_args: Args, _opts: MineXapes) -> Result<(), Box<dyn Error>> {
+async fn mine_xapes(args: Args, opts: MineXapes) -> Result<(), Box<dyn Error>> {
+    let rpc = RpcClient::new(args.rpc);
+    let db = Connection::open(args.db)?;
+
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS xapes (
+            mint_address text primary key,
+            metadata_address text unique,
+            metadata_data_name text,
+            metadata_data_uri text,
+            metadata_json_name text,
+            metadata_json_image text
+        )",
+        params![],
+    )?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS xape_atts (
+            mint_address text,
+            trait_type text,
+            value text
+        )",
+        params![],
+    )?;
+
+    let mints_file = File::open(opts.mints_file)?;
+    let mints_reader = BufReader::new(mints_file);
+    for line in mints_reader.lines() {
+        let mint_address: Pubkey = line?.parse()?;
+        let count: Result<u8, rusqlite::Error> = db.query_row(
+            "SELECT COUNT(*) FROM xapes where mint_address = ?1",
+            params![mint_address.to_string()],
+            |row| row.get(0),
+        );
+        if count? == 1u8 {
+            eprint!("{}", "-");
+            continue;
+        }
+
+        let meta_address = find_metadata_address(mint_address);
+        let meta = rpc.get_account(&meta_address)?;
+        let meta = Metadata::deserialize(&mut meta.data())?;
+        let json = reqwest::get(meta.data.clone().uri)
+            .await?
+            .json::<JsonMeta>()
+            .await?;
+
+        db.execute(
+            "INSERT INTO xapes (
+                mint_address,
+                metadata_address,
+                metadata_data_name,
+                metadata_data_uri,
+                metadata_json_name,
+                metadata_json_image
+            ) values (
+                ?1,
+                ?2,
+                ?3,
+                ?4,
+                ?5,
+                ?6
+            )",
+            params![
+                mint_address.clone().to_string(),
+                meta_address.to_string(),
+                meta.data.name.trim_matches(char::from(0)),
+                meta.data.uri.trim_matches(char::from(0)),
+                json.name,
+                json.image,
+            ],
+        )?;
+
+        for attribute in json.attributes {
+            match attribute.value {
+                Value::Null => todo!(),
+                Value::Bool(_) => todo!(),
+                Value::Number(value) => {
+                    let value = format!("{}", value);
+                    db.execute(
+                        "INSERT INTO xalt_atts (mint_address, trait_type, value) values (?1, ?2, ?3)",
+                        params![mint_address.to_string(), attribute.trait_type, value],
+                    )?;
+                }
+                Value::String(value) => {
+                    db.execute(
+                        "INSERT INTO xalt_atts (mint_address, trait_type, value) values (?1, ?2, ?3)",
+                        params![mint_address.to_string(), attribute.trait_type, value],
+                    )?;
+                }
+                Value::Array(_) => todo!(),
+                Value::Object(_) => todo!(),
+            }
+        }
+        eprint!("{}", "+");
+    }
     Ok(())
 }
 
